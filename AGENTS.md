@@ -1,3 +1,6 @@
+
+bun and bunx none of that node junk.
+
 ## Debugging
 
 - To test opencode in the `packages/opencode` directory you can run `bun dev`

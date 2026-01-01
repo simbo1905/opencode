@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenCode Web API Dashboard</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; padding: 20px; background: #111827; color: #e5e7eb; }
+        .method-get { color: #10b981; }
+        .method-post { color: #3b82f6; }
+        .method-put { color: #f59e0b; }
+        .method-patch { color: #8b5cf6; }
+        .method-delete { color: #ef4444; }
+        .endpoint-row:hover { background: #374151; }
+        .table-container { max-height: 600px; overflow-y: auto; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; text-transform: uppercase; }
+        .bg-green { background: #10b981; color: #000; }
+        .bg-blue { background: #3b82f6; color: #fff; }
+        .bg-purple { background: #8b5cf6; color: #fff; }
+        .bg-red { background: #ef4444; color: #fff; }
+        .bg-orange { background: #f59e0b; color: #000; }
+        .bg-gray { background: #6b7280; color: #fff; }
+        /* Custom scrollbar for dark theme */
+        ::-webkit-scrollbar { width: 10px; height: 10px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 5px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+    </style>
+</head>
+<body>
+    <!-- 
+      NOTE: This dashboard loads inlined JSON data.
+    -->
+    <div id="root">
+        <div class="flex items-center justify-center h-screen">
+            <div class="text-xl text-gray-400 animate-pulse">Loading API Specification...</div>
+        </div>
+    </div>
+
+    <script>
+      // The build script will replace this comment with the actual JSON object
+      window.INJECTED_SPEC = /* __INJECT_JSON_HERE__ */ null;
+    </script>
+
+    <script type="text/babel" data-presets="env,react">
+        const { useState, useEffect, useMemo } = React;
+
+        const MethodBadge = ({ method }) => {
+            const methodClass = method.toLowerCase();
+            const badgeClasses = {
+                'get': 'bg-green',
+                'post': 'bg-blue',
+                'put': 'bg-orange',
+                'patch': 'bg-purple',
+                'delete': 'bg-red',
+            };
+            return <span className={`badge ${badgeClasses[methodClass] || 'bg-gray'}`}>{method.toUpperCase()}</span>;
+        };
+
+        const EndpointTable = ({ endpoints }) => {
+            if (endpoints.length === 0) {
+                return <div className="text-gray-500 italic p-4 text-center">No endpoints match your filter.</div>;
+            }
+            return (
+                <div className="table-container bg-gray-800 rounded-lg border border-gray-700 shadow-xl">
+                    <table className="w-full text-sm text-left">
+                        <thead className="sticky top-0 bg-gray-900 shadow-sm z-10">
+                            <tr>
+                                <th className="p-4 font-semibold text-gray-300 w-1/4">Path</th>
+                                <th className="p-4 font-semibold text-gray-300 w-24">Method</th>
+                                <th className="p-4 font-semibold text-gray-300 w-1/4">Operation ID</th>
+                                <th className="p-4 font-semibold text-gray-300 w-1/4">Summary</th>
+                                <th className="p-4 font-semibold text-gray-300">Description</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-700">
+                            {endpoints.map((endpoint, idx) => (
+                                <tr key={idx} className="endpoint-row transition-colors duration-150 ease-in-out">
+                                    <td className="p-4 font-mono text-xs text-blue-300 break-all">{endpoint.path}</td>
+                                    <td className="p-4"><MethodBadge method={endpoint.method} /></td>
+                                    <td className="p-4 font-mono text-xs text-purple-300">{endpoint.operationId}</td>
+                                    <td className="p-4 text-gray-100 font-medium">{endpoint.summary}</td>
+                                    <td className="p-4 text-gray-400 text-xs italic">{endpoint.description}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            );
+        };
+
+        const Dashboard = () => {
+            const [spec, setSpec] = useState(null);
+            const [error, setError] = useState(null);
+            const [filterText, setFilterText] = useState('');
+            const [selectedCategory, setSelectedCategory] = useState('all');
+
+            useEffect(() => {
+                if (window.INJECTED_SPEC) {
+                    setSpec(window.INJECTED_SPEC);
+                } else {
+                    setError("No API specification found. Ensure this file was generated correctly.");
+                }
+            }, []);
+
+            const endpoints = useMemo(() => {
+                if (!spec) return [];
+                const list = [];
+                const VALID_METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'];
+
+                Object.entries(spec.paths || {}).forEach(([path, methods]) => {
+                    Object.entries(methods).forEach(([method, operation]) => {
+                        if (!VALID_METHODS.includes(method.toLowerCase())) return; // Skip non-HTTP verbs (parameters, etc)
+                        
+                        list.push({
+                            path,
+                            method,
+                            operationId: operation.operationId || 'N/A',
+                            summary: operation.summary || '',
+                            description: operation.description || '',
+                            // Heuristic category: first segment after root
+                            category: path.split('/')[1] || 'root'
+                        });
+                    });
+                });
+                return list;
+            }, [spec]);
+
+            const categories = useMemo(() => {
+                const cats = {};
+                endpoints.forEach(ep => {
+                    if (!cats[ep.category]) cats[ep.category] = 0;
+                    cats[ep.category]++;
+                });
+                return Object.entries(cats).sort((a, b) => b[1] - a[1]); // Sort by count desc
+            }, [endpoints]);
+
+            const filteredEndpoints = useMemo(() => {
+                return endpoints.filter(ep => {
+                    const matchesCategory = selectedCategory === 'all' || ep.category === selectedCategory;
+                    const search = filterText.toLowerCase();
+                    const matchesSearch = 
+                        ep.path.toLowerCase().includes(search) || 
+                        ep.summary.toLowerCase().includes(search) || 
+                        ep.description.toLowerCase().includes(search) || 
+                        ep.operationId.toLowerCase().includes(search);
+                    return matchesCategory && matchesSearch;
+                });
+            }, [endpoints, selectedCategory, filterText]);
+
+            if (error) return (
+                <div className="flex items-center justify-center h-screen">
+                    <div className="bg-red-900 border border-red-700 text-red-100 px-6 py-4 rounded-lg shadow-lg max-w-2xl mx-4">
+                        <div className="flex items-start">
+                            <svg className="w-6 h-6 mr-3 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <div>
+                                <h3 className="font-bold text-lg mb-1">Error Loading API Specification</h3>
+                                <p className="mb-2 font-mono text-sm bg-red-950 px-2 py-1 rounded border border-red-800">{error}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+
+            if (!spec) return (
+                <div className="flex items-center justify-center h-screen">
+                    <div className="text-xl text-blue-400 animate-pulse font-semibold">Loading API Specification...</div>
+                </div>
+            );
+
+            const info = spec.info || {};
+
+            return (
+                <div className="max-w-7xl mx-auto pb-12">
+                    <header className="mb-8 border-b border-gray-700 pb-6">
+                        <a href="OPENAPI.html" className="text-gray-400 hover:text-white mb-4 block inline-flex items-center text-sm font-medium transition-colors">
+                            <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                            </svg>
+                            Back to Index
+                        </a>
+                        <div className="flex justify-between items-end">
+                            <div>
+                                <h1 className="text-4xl font-bold text-white mb-2 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
+                                    {info.title || 'OpenAPI'} Dashboard
+                                </h1>
+                                <p className="text-gray-400 max-w-2xl">{info.description || 'No description available.'}</p>
+                            </div>
+                            <div className="text-right">
+                                <span className="bg-gray-700 text-gray-300 px-3 py-1 rounded-full text-xs font-mono">v{info.version || '0.0.0'}</span>
+                                <p className="text-gray-500 text-xs mt-2">{endpoints.length} Endpoints</p>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Controls */}
+                    <div className="mb-8 space-y-4">
+                        <div className="relative">
+                            <input
+                                type="text"
+                                placeholder="Search paths, summaries, operation IDs..."
+                                className="w-full bg-gray-800 border border-gray-600 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-500 transition-all"
+                                value={filterText}
+                                onChange={(e) => setFilterText(e.target.value)}
+                            />
+                            <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-gray-500">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2 flex-wrap">
+                            <button
+                                onClick={() => setSelectedCategory('all')}
+                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 border ${
+                                    selectedCategory === 'all' 
+                                    ? 'bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-900/50' 
+                                    : 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-700 hover:border-gray-600'
+                                }`}
+                            >
+                                All <span className="opacity-60 text-xs ml-1">({endpoints.length})</span>
+                            </button>
+                            {categories.map(([cat, count]) => (
+                                <button
+                                    key={cat}
+                                    onClick={() => setSelectedCategory(cat)}
+                                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 border capitalize ${
+                                        selectedCategory === cat
+                                        ? 'bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-900/50' 
+                                        : 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-700 hover:border-gray-600'
+                                    }`}
+                                >
+                                    {cat} <span className="opacity-60 text-xs ml-1">({count})</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <section>
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-2xl font-semibold text-white">
+                                {selectedCategory === 'all' ? 'All Endpoints' : `/${selectedCategory} Endpoints`}
+                            </h2>
+                            <span className="text-sm text-gray-500">
+                                Showing {filteredEndpoints.length} of {endpoints.length}
+                            </span>
+                        </div>
+                        <EndpointTable endpoints={filteredEndpoints} />
+                    </section>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<Dashboard />);
+    </script>
+</body>
+</html>
