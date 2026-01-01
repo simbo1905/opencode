@@ -248,29 +248,6 @@ export function Session() {
     dialog.clear()
   }
 
-  useKeyboard((evt) => {
-    if (dialog.stack.length > 0) return
-
-    const first = permissions()[0]
-    if (first) {
-      const response = iife(() => {
-        if (evt.ctrl || evt.meta) return
-        if (evt.name === "return") return "once"
-        if (evt.name === "a") return "always"
-        if (evt.name === "d") return "reject"
-        if (evt.name === "escape") return "reject"
-        return
-      })
-      if (response) {
-        sdk.client.permission.respond({
-          permissionID: first.id,
-          sessionID: route.sessionID,
-          response: response,
-        })
-      }
-    }
-  })
-
   function toBottom() {
     setTimeout(() => {
       if (scroll) scroll.scrollTo(scroll.scrollHeight)
