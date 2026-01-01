@@ -29,6 +29,7 @@ export const TaskTool = Tool.define("task", async () => {
       command: z.string().describe("The command that triggered this task").optional(),
     }),
     async execute(params, ctx) {
+      const config = await Config.get()
       await ctx.ask({
         permission: "task",
         patterns: [params.subagent_type],
@@ -120,7 +121,6 @@ export const TaskTool = Tool.define("task", async () => {
       using _ = defer(() => ctx.abort.removeEventListener("abort", cancel))
       const promptParts = await SessionPrompt.resolvePromptParts(params.prompt)
 
-      const config = await Config.get()
       const result = await SessionPrompt.prompt({
         messageID,
         sessionID: session.id,
