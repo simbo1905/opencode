@@ -409,6 +409,7 @@ export namespace Config {
       webfetch: PermissionAction.optional(),
       websearch: PermissionAction.optional(),
       codesearch: PermissionAction.optional(),
+      lsp: PermissionRule.optional(),
       doom_loop: PermissionAction.optional(),
     })
     .catchall(PermissionRule)
