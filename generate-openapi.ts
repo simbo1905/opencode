@@ -1,9 +1,16 @@
 import { Server } from "./packages/opencode/src/server/server"
 import { writeFileSync, readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 async function generateOpenApi() {
   try {
+    // robustly resolve paths relative to this script
+    const rootDir = resolve(dirname(fileURLToPath(import.meta.url))); 
+    const rootOpenapiPath = join(rootDir, 'openapi.json');
+    const sdkPath = join(rootDir, 'packages/sdk/openapi.json');
+    const docsPath = join(rootDir, 'packages/docs/openapi.json');
+
     console.log("Generating OpenAPI documentation...")
     const openapi = await Server.openapi()
     console.log("OpenAPI spec generated successfully")
@@ -11,12 +18,23 @@ async function generateOpenApi() {
     console.log("Title:", openapi.info?.title)
     console.log("Version:", openapi.info?.version)
     
-    writeFileSync('openapi.json', JSON.stringify(openapi, null, 2))
-    console.log("\nOpenAPI spec written to openapi.json")
+    const openapiJson = JSON.stringify(openapi, null, 2);
+
+    // 1. Write to root (optional but good for reference)
+    writeFileSync(rootOpenapiPath, openapiJson)
+    console.log(`\nOpenAPI spec written to ${rootOpenapiPath}`)
+
+    // 2. Write to SDK explicitly (source of truth)
+    writeFileSync(sdkPath, openapiJson)
+    console.log(`OpenAPI spec written to ${sdkPath}`)
+
+    // 3. Write to Docs (robustness: updates file or follows symlink)
+    writeFileSync(docsPath, openapiJson)
+    console.log(`OpenAPI spec written to ${docsPath}`)
 
     // Generate self-contained HTML dashboards
     console.log("Generating self-contained HTML dashboards...");
-    const templatePath = join(process.cwd(), 'dashboard_template.html');
+    const templatePath = join(rootDir, 'dashboard_template.html');
     
     if (!existsSync(templatePath)) {
         console.warn("dashboard_template.html not found, skipping HTML generation.");
@@ -58,8 +76,9 @@ async function generateOpenApi() {
     const generateHtml = (filename: string, specData: any) => {
         const jsonString = JSON.stringify(specData);
         const htmlContent = template.replace('/* __INJECT_JSON_HERE__ */ null', () => jsonString);
-        writeFileSync(filename, htmlContent);
-        console.log(`Generated ${filename} (${Object.keys(specData.paths).length} paths)`);
+        const outputPath = join(rootDir, filename);
+        writeFileSync(outputPath, htmlContent);
+        console.log(`Generated ${outputPath} (${Object.keys(specData.paths).length} paths)`);
     };
 
     generateHtml('OPENAPI_CORE.html', specs.core);

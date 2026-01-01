@@ -140,15 +140,18 @@
             }, [endpoints]);
 
             const filteredEndpoints = useMemo(() => {
+                const search = filterText.toLowerCase().trim();
                 return endpoints.filter(ep => {
                     const matchesCategory = selectedCategory === 'all' || ep.category === selectedCategory;
-                    const search = filterText.toLowerCase();
-                    const matchesSearch = 
-                        ep.path.toLowerCase().includes(search) || 
-                        ep.summary.toLowerCase().includes(search) || 
-                        ep.description.toLowerCase().includes(search) || 
-                        ep.operationId.toLowerCase().includes(search);
-                    return matchesCategory && matchesSearch;
+                    if (!matchesCategory) return false;
+                    if (!search) return true;
+
+                    return (
+                        (ep.path || '').toLowerCase().includes(search) || 
+                        (ep.summary || '').toLowerCase().includes(search) || 
+                        (ep.description || '').toLowerCase().includes(search) || 
+                        (ep.operationId || '').toLowerCase().includes(search)
+                    );
                 });
             }, [endpoints, selectedCategory, filterText]);
 
