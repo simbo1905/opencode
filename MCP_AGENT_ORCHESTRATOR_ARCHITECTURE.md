@@ -6,10 +6,13 @@ The **MCP Agent Orchestrator** is a control plane that enables MCP hosts (Claude
 
 - **Isolation**: Each agent operates in its own Git worktree with no shared state
 - **Concurrency**: Hundreds of transient agents per month, fully tracked
-- **Automation**: Full lifecycle management without polluting the user's main repositories
+- **Automation**: Full lifecycle management without polluting the user's local git checkout
 - **Portability**: Runs on Lima VM (macOS), WSL (Windows), or remote VPS
+- **State Reproducibility**: Rollback both the filesystem and chat history to any previous state.
 
-The orchestrator acts as a **subagent factory** - MCP hosts spawn agents via SSE, the orchestrator manages their lifecycles, and artefacts flow back through registered outputs.
+It is a **Foreground First, Local First** solution that has the immediacy of local development with the convenience of isolated, disposable, background agents.
+
+The orchestrator acts as a **subagent factory** - MCP hosts spawn agents via SSE, the orchestrator manages their lifecycles, and artefacts flow back through registered outputs. This replaces the manual juggling of which agents, are working on which parallel task, for which project swimlane, on which piece of disk, working on which local or remote branch. 
 
 ## High-Level Architecture
 
