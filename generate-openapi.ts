@@ -45,7 +45,7 @@ async function generateOpenApi() {
 
     const categories = {
         mcp: ['/mcp', '/experimental/tool'],
-        pty: ['/pty', '/tui'],
+        serve: ['/pty', '/tui'],
     };
 
     // Create copies of the spec for each category
@@ -58,32 +58,56 @@ async function generateOpenApi() {
     });
 
     const specs = {
-        core: createSpec("OpenCode Core API"),
+        web: createSpec("OpenCode Web API"),
         mcp: createSpec("OpenCode MCP API"),
-        pty: createSpec("OpenCode PTY/TUI API")
+        serve: createSpec("OpenCode Serve API")
     };
 
     Object.entries(openapi.paths || {}).forEach(([pathKey, pathItem]) => {
         if (categories.mcp.some(prefix => pathKey.startsWith(prefix))) {
             specs.mcp.paths[pathKey] = pathItem;
-        } else if (categories.pty.some(prefix => pathKey.startsWith(prefix))) {
-            specs.pty.paths[pathKey] = pathItem;
+        } else if (categories.serve.some(prefix => pathKey.startsWith(prefix))) {
+            specs.serve.paths[pathKey] = pathItem;
         } else {
-            specs.core.paths[pathKey] = pathItem;
+            specs.web.paths[pathKey] = pathItem;
         }
     });
 
-    const generateHtml = (filename: string, specData: any) => {
+    const generateHtml = (filename: string, specData: any, title: string, indexLink: string) => {
         const jsonString = JSON.stringify(specData);
-        const htmlContent = template.replace('/* __INJECT_JSON_HERE__ */ null', () => jsonString);
+        let htmlContent = template.replace('/* __INJECT_JSON_HERE__ */ null', () => jsonString);
+        // Replace title if placeholder exists
+        htmlContent = htmlContent.replace('/* __INJECT_TITLE_HERE__ */ OpenCode API Dashboard', title);
+        // Replace index link
+        htmlContent = htmlContent.replace('/* __INJECT_INDEX_LINK_HERE__ */', indexLink);
+        
         const outputPath = join(rootDir, filename);
         writeFileSync(outputPath, htmlContent);
         console.log(`Generated ${outputPath} (${Object.keys(specData.paths).length} paths)`);
     };
 
-    generateHtml('OPENAPI_CORE.html', specs.core);
-    generateHtml('OPENAPI_MCP.html', specs.mcp);
-    generateHtml('OPENAPI_PTY.html', specs.pty);
+    generateHtml('OPENAPI_WEB.html', specs.web, "OpenCode Web API", "OPENAPI_WEB_INDEX.html");
+    generateHtml('OPENAPI_MCP.html', specs.mcp, "OpenCode MCP API", "OPENAPI_WEB_INDEX.html");
+    generateHtml('OPENAPI_SERVE.html', specs.serve, "OpenCode Serve API", "OPENAPI_SERVE_INDEX.html");
+
+    // Generate Index Pages from templates
+    console.log("Generating index pages...");
+    const webIndexTemplate = join(rootDir, 'template_web_index.html');
+    const serveIndexTemplate = join(rootDir, 'template_serve_index.html');
+
+    if (existsSync(webIndexTemplate)) {
+        writeFileSync(join(rootDir, 'OPENAPI_WEB_INDEX.html'), readFileSync(webIndexTemplate));
+        console.log("Generated OPENAPI_WEB_INDEX.html");
+    } else {
+        console.warn("template_web_index.html not found");
+    }
+
+    if (existsSync(serveIndexTemplate)) {
+        writeFileSync(join(rootDir, 'OPENAPI_SERVE_INDEX.html'), readFileSync(serveIndexTemplate));
+        console.log("Generated OPENAPI_SERVE_INDEX.html");
+    } else {
+        console.warn("template_serve_index.html not found");
+    }
 
     return openapi
   } catch (error) {
