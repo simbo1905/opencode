@@ -152,6 +152,64 @@ The dashboard provides:
 
 **All writes go through the MCP server loop** - the dashboard only reads from SQLite.
 
+## Resilience & State Model
+
+### ID strategy
+
+- Every table has an auto-increment `seq` primary key (INTEGER).
+- API-visible IDs are stable strings with a type prefix plus zero-padded sequence:
+  - profiles → `pro_00000001`
+  - conversations → `conv_00000001`
+  - agents → `agt_00000001`
+  - tasks → `tsk_00000001`
+  - artefacts → `art_00000001`
+- The orchestrator generates these IDs inside a single transaction when inserting rows, so they are monotonic and unique per entity type.
+- An optional `id_map` table allows attaching time-ordered UUIDs/ULIDs where helpful (for cross-instance correlation or log stitching) without changing core IDs.
+
+### Timestamps and GC model
+
+- All tables carry `created_at` and `updated_at`.
+- Long-lived entities (agents, tasks, artefacts) also have GC-related flags:
+  - `gc_state` on agents and tasks: `live`, `pinned`, `ready_gc`, `gc_done`.
+  - `exported` boolean on artefacts for “this has been surfaced back to the real-world repo / user”.
+- Disk is assumed plentiful; GC is about navigability and sanity, not squeezing every byte.
+- A periodic GC worker:
+  - finds entities in `ready_gc` with `updated_at` older than a retention window,
+  - removes associated worktrees and artefact files,
+  - marks rows as `gc_done` (or deletes them if a hard-delete mode is desired),
+  - optionally triggers SQLite `VACUUM` during low-load windows.
+
+### Conversational model
+
+- `host_id` identifies which MCP host (Claude Desktop, Vibe, etc.).
+- `conversations` model one logical chat/thread on that host:
+  - optional `host_thread_key` stores the host’s own thread identifier if provided.
+- `agents` belong to exactly one `conversation` and one `profile`.
+- `tasks` belong to both an `agent` and its `conversation`:
+  - optional `parent_task_seq` supports multi-turn chains within the same agent.
+- `artefacts` belong to a `task` and its `agent`.
+
+This mapping supports:
+- multiple conversations per host,
+- multiple agents per conversation,
+- multiple tasks per agent (multi-turn),
+- straightforward joins from any artefact back to host and human-visible thread.
+
+### Concurrency and crash recovery
+
+- SQLite runs in WAL mode for safe concurrent reads and writes.
+- Each high-level operation (`spawn_agent`, `submit_task`, `register_artefact`, status updates) runs in a transaction:
+  - write intent to the database first,
+  - then perform external side effects (worktree creation, process spawn, call into OpenCode),
+  - then persist final status or error.
+- The orchestrator is restartable:
+  - on startup it scans for agents with `status IN ('starting','running')`,
+  - reconciles those with actual PTYs/processes,
+  - transitions clearly dead ones to `error` and optionally `ready_gc`.
+- SSE tool calls are designed to be idempotent where possible:
+  - reads (`get_*`, `list_*`) are always safe to retry,
+  - mutating operations can take idempotency keys (e.g. “do not spawn another agent if one already exists for this conversation + role”), and are applied under database constraints so duplicate inserts fail cleanly instead of corrupting state.
+
 ## Sequence Diagrams
 
 ### Agent Spawn Flow
@@ -272,69 +330,184 @@ sequenceDiagram
 | 8 | File data returned |
 | 9 | Content streamed back to host |
 
-## Database Schema (Spike)
+### Multi-Conversation and Multi-Turn Flows
+
+These flows focus on resilience of conversational state: different threads on an MCP host owning different agents and tasks, and multi-turn interactions with the same agent.
+
+#### Multiple host threads with separate conversations
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Th1 as Host Thread 1
+    participant Th2 as Host Thread 2
+    participant Orch as Orchestrator
+    participant DB as SQLite
+
+    Th1->>Orch: spawn_agent(profile=default, thread_key=A)
+    Orch->>DB: BEGIN TRANSACTION
+    DB-->>Orch: upsert conversation for host A (conv_00000001)
+    DB-->>Orch: insert agent for conv_00000001 (agt_00000001)
+    Orch->>DB: COMMIT
+    Orch-->>Th1: agent_id=agt_00000001
+
+    Th2->>Orch: spawn_agent(profile=default, thread_key=B)
+    Orch->>DB: BEGIN TRANSACTION
+    DB-->>Orch: upsert conversation for host B (conv_00000002)
+    DB-->>Orch: insert agent for conv_00000002 (agt_00000002)
+    Orch->>DB: COMMIT
+    Orch-->>Th2: agent_id=agt_00000002
+
+    Th1->>Orch: submit_task(agent_id=agt_00000001, prompt turn 1)
+    Th2->>Orch: submit_task(agent_id=agt_00000002, prompt turn 1)
+    Orch->>DB: INSERT tasks linked to each agent and conversation
+    DB-->>Orch: tsk_00000001, tsk_00000002
+    Orch-->>Th1: task_id=tsk_00000001
+    Orch-->>Th2: task_id=tsk_00000002
+```
+
+| # | Description |
+|---|-------------|
+| 1 | Two independent host threads talk to the same orchestrator |
+| 2 | Orchestrator creates or reuses a `conversation` per thread key under a transaction |
+| 3 | Each conversation gets its own agent with its own worktree |
+| 4 | Tasks from each thread are inserted with correct `conversation_seq` and `agent_seq` |
+| 5 | IDs are monotonic per table and safely returned to the host |
+
+#### Multi-turn tasks for a single agent
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Th as Host Thread
+    participant Orch as Orchestrator
+    participant DB as SQLite
+    participant OC as opencode serve
+
+    Th->>Orch: spawn_agent(profile, thread_key)
+    Orch->>DB: INSERT conversation and agent
+    DB-->>Orch: conv_00000010, agt_00000010
+    Orch-->>Th: agent_id=agt_00000010
+
+    Th->>Orch: submit_task(agt_00000010, prompt turn 1)
+    Orch->>DB: INSERT task tsk_00000100 (parent=NULL)
+    Orch->>OC: run turn 1 in agent worktree
+    OC-->>Orch: progress events and artefacts
+    Orch->>DB: UPDATE task tsk_00000100 to completed
+    Orch->>DB: INSERT artefacts art_00000100, art_00000101
+    Orch-->>Th: task_id=tsk_00000100, artefact_ids=[art_00000100,...]
+
+    Th->>Orch: submit_task(agt_00000010, prompt turn 2, parent_task_id=tsk_00000100)
+    Orch->>DB: INSERT task tsk_00000101 (parent=tsk_00000100)
+    Orch->>OC: run turn 2 with updated prompt/context
+    OC-->>Orch: events and new artefacts
+    Orch->>DB: UPDATE task tsk_00000101 to completed
+    Orch->>DB: INSERT artefacts art_00000102, ...
+    Orch-->>Th: task_id=tsk_00000101, artefact_ids=[art_00000102,...]
+```
+
+| # | Description |
+|---|-------------|
+| 1 | A host thread spawns one agent in a conversation |
+| 2 | First `submit_task` creates an initial task with no parent |
+| 3 | Task status transitions from `pending` → `running` → `completed` under DB control |
+| 4 | Artefacts for the first turn are recorded with stable IDs and paths |
+| 5 | Second `submit_task` references the first via `parent_task_id` for multi-turn context |
+| 6 | A new task row is created with its own lifecycle and artefacts |
+| 7 | The full chain of turns can be reconstructed by following `parent_task_seq` |
+
+Parallelism comes from:
+- different conversations executing in parallel with isolated agents and worktrees,
+- different agents within the same conversation also running in parallel,
+- tasks of a single agent typically serialized through that agent’s PTY/TUI, while still being fully tracked in SQLite.
+
+## Database Schema & ID Strategy
 
 ```sql
 -- Profiles define repo configurations
 CREATE TABLE profiles (
-    id TEXT PRIMARY KEY,
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE, -- e.g. 'pro_00000001'
     name TEXT NOT NULL,
     bare_repo_path TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Agents are spawned instances
+-- MCP host-level conversations (one per chat/thread)
+CREATE TABLE conversations (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE, -- e.g. 'conv_00000001'
+    host_id TEXT NOT NULL,   -- e.g. 'claude-desktop'
+    host_thread_key TEXT,    -- opaque identifier from host, if available
+    profile_seq INTEGER NOT NULL REFERENCES profiles(seq),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Agents are spawned instances bound to a conversation
 CREATE TABLE agents (
-    id TEXT PRIMARY KEY,
-    profile_id TEXT NOT NULL REFERENCES profiles(id),
-    host_id TEXT,
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE, -- e.g. 'agt_00000001'
+    conversation_seq INTEGER NOT NULL REFERENCES conversations(seq),
+    profile_seq INTEGER NOT NULL REFERENCES profiles(seq),
     branch_name TEXT NOT NULL,
     worktree_path TEXT NOT NULL,
     pty_id TEXT,
     opencode_port INTEGER,
-    status TEXT CHECK(status IN ('starting', 'running', 'idle', 'error', 'terminated')),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    status TEXT NOT NULL CHECK(status IN ('starting','running','idle','error','terminated')),
+    gc_state TEXT NOT NULL DEFAULT 'live' CHECK(gc_state IN ('live','pinned','ready_gc','gc_done')),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_heartbeat_at DATETIME
 );
 
--- Tasks are work items for agents
+-- Tasks are work items for agents (multi-turn supported)
 CREATE TABLE tasks (
-    id TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL REFERENCES agents(id),
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE, -- e.g. 'tsk_00000001'
+    agent_seq INTEGER NOT NULL REFERENCES agents(seq),
+    conversation_seq INTEGER NOT NULL REFERENCES conversations(seq),
+    parent_task_seq INTEGER REFERENCES tasks(seq),
     prompt TEXT NOT NULL,
-    params TEXT,  -- JSON
-    status TEXT CHECK(status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    completed_at TIMESTAMP
+    params_json TEXT,  -- JSON blob
+    status TEXT NOT NULL CHECK(status IN ('pending','running','completed','failed','cancelled')),
+    gc_state TEXT NOT NULL DEFAULT 'live' CHECK(gc_state IN ('live','pinned','ready_gc','gc_done')),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    started_at DATETIME,
+    completed_at DATETIME
 );
 
 -- Artefacts are outputs from tasks
 CREATE TABLE artefacts (
-    id TEXT PRIMARY KEY,
-    task_id TEXT NOT NULL REFERENCES tasks(id),
-    agent_id TEXT NOT NULL REFERENCES agents(id),
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE, -- e.g. 'art_00000001'
+    task_seq INTEGER NOT NULL REFERENCES tasks(seq),
+    agent_seq INTEGER NOT NULL REFERENCES agents(seq),
     name TEXT NOT NULL,
     mimetype TEXT NOT NULL,
     path TEXT NOT NULL,
     size_bytes INTEGER,
     committed BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    exported BOOLEAN DEFAULT FALSE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Conversation threads from MCP hosts
-CREATE TABLE conversations (
-    id TEXT PRIMARY KEY,
-    host_id TEXT NOT NULL,
-    profile_id TEXT REFERENCES profiles(id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+-- Optional mapping to time-ordered IDs (ULID/UUID) for cross-system correlation
+CREATE TABLE id_map (
+    ulid TEXT PRIMARY KEY,
+    entity_type TEXT NOT NULL, -- 'conversation','task','artefact',...
+    entity_seq INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Link conversations to agents
-CREATE TABLE conversation_agents (
-    conversation_id TEXT REFERENCES conversations(id),
-    agent_id TEXT REFERENCES agents(id),
-    PRIMARY KEY (conversation_id, agent_id)
-);
+-- Indexes for common queries and fast traversal
+CREATE INDEX idx_tasks_agent ON tasks(agent_seq, created_at);
+CREATE INDEX idx_tasks_conversation ON tasks(conversation_seq, created_at);
+CREATE INDEX idx_artefacts_task ON artefacts(task_seq);
+CREATE INDEX idx_agents_conversation ON agents(conversation_seq);
 ```
 
 ## MCP Tools Exposed
