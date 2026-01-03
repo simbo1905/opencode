@@ -8,9 +8,12 @@
   "scripts": {
     "dev": "bun run --cwd packages/opencode --conditions=browser src/index.ts",
     "typecheck": "bun turbo typecheck",
+    "docs": "bun run generate-openapi.ts",
+    "clean:docs": "rm OPENAPI*.html openapi.json",
     "prepare": "husky",
     "random": "echo 'Random script'",
-    "hello": "echo 'Hello World!'"
+    "hello": "echo 'Hello World!'",
+    "test": "echo 'do not run tests from root' && exit 1"
   },
   "workspaces": {
     "packages": [
