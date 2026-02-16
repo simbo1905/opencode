@@ -267,6 +267,146 @@ function M.trash_message(args, sessions, jmap_client)
   })
 end
 
+-- send_message: Requires approval gate
+function M.send_message(args, sessions, jmap_client, approvals, ledger)
+  local sid = args.session_id
+  local parent_ref = args.parent_ref
+
+  if not sessions.exists(sid) then
+    return tool_error("session_not_found", "Session does not exist")
+  end
+
+  -- Approval gate
+  local ok, rejection = approvals.gate(sid, "send", args.approval)
+  if not ok then
+    return tool_error("approval_required", "Send requires explicit approval", rejection)
+  end
+
+  local entry, aerr = append(sessions, sid, parent_ref, "send_message", {
+    message_id = args.message_id,
+    to = args.to,
+    subject = args.subject,
+    body = args.body,
+  })
+  if not entry then
+    return aerr
+  end
+
+  -- Schedule in ledger
+  local ledger_entry = ledger.schedule(sid, entry.opref, "send", {
+    message_id = args.message_id,
+    to = args.to,
+    subject = args.subject,
+  }, args.delay_spec)
+
+  if args.delay_spec then
+    sessions.set_result(sid, entry.opref, {ok = true, status = "scheduled", ledger_id = ledger_entry.id})
+    return tool_response({
+      opref = entry.opref,
+      action = "send",
+      status = "scheduled",
+      ledger_id = ledger_entry.id,
+      delay_spec = args.delay_spec,
+    })
+  end
+
+  -- Immediate execution
+  local executed, exec_err = ledger.execute(ledger_entry.id)
+  if not executed then
+    sessions.set_result(sid, entry.opref, {ok = false, error = exec_err})
+    return tool_error("execution_failed", "Send execution failed", exec_err)
+  end
+
+  -- TODO: Perform actual JMAP EmailSubmission/set
+  ledger.set_result(ledger_entry.id, {ok = false, status = "not_implemented"})
+  sessions.set_result(sid, entry.opref, {ok = false, status = "not_implemented"})
+
+  return tool_response({
+    opref = entry.opref,
+    action = "send",
+    status = "not_implemented",
+    ledger_id = ledger_entry.id,
+  })
+end
+
+-- delete_message: Requires approval for hard-delete; trash is safe
+function M.delete_message(args, sessions, jmap_client, approvals, ledger)
+  local sid = args.session_id
+  local parent_ref = args.parent_ref
+  local message_id = args.message_id
+  local hard = args.hard_delete or false
+
+  if not sessions.exists(sid) then
+    return tool_error("session_not_found", "Session does not exist")
+  end
+
+  local action = hard and "delete_hard" or "trash"
+
+  -- Approval gate (hard delete requires approval; trash is safe)
+  local ok, rejection = approvals.gate(sid, action, args.approval)
+  if not ok then
+    return tool_error("approval_required", "Hard delete requires explicit approval", rejection)
+  end
+
+  local entry, aerr = append(sessions, sid, parent_ref, "delete_message", {
+    message_id = message_id,
+    hard_delete = hard,
+  })
+  if not entry then
+    return aerr
+  end
+
+  -- Schedule in ledger
+  local ledger_entry = ledger.schedule(sid, entry.opref, action, {
+    message_id = message_id,
+  }, args.delay_spec)
+
+  if args.delay_spec then
+    sessions.set_result(sid, entry.opref, {ok = true, status = "scheduled", ledger_id = ledger_entry.id})
+    return tool_response({
+      opref = entry.opref,
+      action = action,
+      status = "scheduled",
+      ledger_id = ledger_entry.id,
+    })
+  end
+
+  -- Immediate execution
+  local executed, exec_err = ledger.execute(ledger_entry.id)
+  if not executed then
+    sessions.set_result(sid, entry.opref, {ok = false, error = exec_err})
+    return tool_error("execution_failed", "Delete execution failed", exec_err)
+  end
+
+  -- TODO: Perform actual JMAP Email/set
+  ledger.set_result(ledger_entry.id, {ok = false, status = "not_implemented"})
+  sessions.set_result(sid, entry.opref, {ok = false, status = "not_implemented"})
+
+  return tool_response({
+    opref = entry.opref,
+    action = action,
+    status = "not_implemented",
+    message_id = message_id,
+    ledger_id = ledger_entry.id,
+  })
+end
+
+-- query_ledger: Query the action ledger
+function M.query_ledger(args, ledger)
+  local filter = {}
+  if args.state then filter.state = args.state end
+  if args.session_id then filter.session_id = args.session_id end
+  if args.action then filter.action = args.action end
+
+  local entries = ledger.query(filter)
+  local counts = ledger.counts()
+
+  return tool_response({
+    entries = entries,
+    counts = counts,
+  })
+end
+
 -- session_status: Query session state
 function M.session_status(args, sessions)
   local sid = args.session_id

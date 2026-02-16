@@ -20,9 +20,14 @@ local config = require("config")
 local session_mgr = require("session")
 local jmap = require("jmap")
 local json = require("dkjson")
+local approval_mod = require("approval")
+local ledger_mod = require("ledger")
+local tools = require("tools")
 
--- Initialize session manager
+-- Initialize modules
 local sessions = session_mgr.new()
+local approvals = approval_mod.new(config.approval)
+local action_ledger = ledger_mod.new()
 
 print("=== MCP Email Server ===")
 print("Protocol: MCP 2024-11-05")
@@ -110,6 +115,52 @@ local tools = {
     },
   },
   {
+    name = "send_message",
+    description = "Send an email (requires explicit approval)",
+    inputSchema = {
+      type = "object",
+      properties = {
+        session_id = {type = "string"},
+        parent_ref = {type = "string"},
+        message_id = {type = "string", description = "Draft message ID to send"},
+        to = {type = "string"},
+        subject = {type = "string"},
+        body = {type = "string"},
+        approval = {type = "object", description = "Approval grant: {scope: 'once'|'session'|'always'}"},
+        delay_spec = {type = "object", description = "Delay execution: {delay_seconds: number}"},
+      },
+      required = {"session_id", "parent_ref", "approval"},
+    },
+  },
+  {
+    name = "delete_message",
+    description = "Delete a message (trash is safe; hard_delete requires approval)",
+    inputSchema = {
+      type = "object",
+      properties = {
+        session_id = {type = "string"},
+        parent_ref = {type = "string"},
+        message_id = {type = "string"},
+        hard_delete = {type = "boolean", description = "If true, permanently delete (requires approval)"},
+        approval = {type = "object", description = "Approval grant for hard delete"},
+        delay_spec = {type = "object", description = "Delay execution"},
+      },
+      required = {"session_id", "parent_ref", "message_id"},
+    },
+  },
+  {
+    name = "query_ledger",
+    description = "Query the action ledger for scheduled/executed/failed actions",
+    inputSchema = {
+      type = "object",
+      properties = {
+        session_id = {type = "string"},
+        state = {type = "string", description = "Filter by state: pending, executed, cancelled, failed"},
+        action = {type = "string", description = "Filter by action type"},
+      },
+    },
+  },
+  {
     name = "session_status",
     description = "Query session state: head OpRef, recent operations, traversal anchors",
     inputSchema = {
@@ -123,32 +174,25 @@ local tools = {
   },
 }
 
--- TODO: Implement tool handlers
--- For now, we have stubs that return "not implemented"
+-- Tool dispatch table
+local dispatchers = {
+  list_messages = function(args) return tools.list_messages(args, sessions, nil) end,
+  get_message = function(args) return tools.get_message(args, sessions, nil) end,
+  classify_email = function(args) return tools.classify_email(args, sessions, nil, config) end,
+  archive_message = function(args) return tools.archive_message(args, sessions, nil, approvals) end,
+  trash_message = function(args) return tools.trash_message(args, sessions, nil, approvals) end,
+  send_message = function(args) return tools.send_message(args, sessions, nil, approvals, action_ledger) end,
+  delete_message = function(args) return tools.delete_message(args, sessions, nil, approvals, action_ledger) end,
+  session_status = function(args) return tools.session_status(args, sessions) end,
+  query_ledger = function(args) return tools.query_ledger(args, action_ledger) end,
+}
 
 local function handle_tool_call(tool_name, args)
-  if tool_name == "session_status" then
-    local sid = args.session_id
-    if not sessions.exists(sid) then
-      return {error = "Session not found"}
-    end
-    
-    local head = sessions.head(sid)
-    local recent = sessions.recent(sid, args.recent_count or 10)
-    
-    return {
-      session_id = sid,
-      head_opref = head,
-      log_length = sessions.length(sid),
-      recent_operations = recent,
-    }
+  local handler = dispatchers[tool_name]
+  if not handler then
+    return {error = "unknown_tool", message = string.format("Tool '%s' not found", tool_name)}
   end
-  
-  -- All other tools return not_implemented for now
-  return {
-    error = "not_implemented",
-    message = string.format("Tool '%s' is not yet implemented", tool_name),
-  }
+  return handler(args)
 end
 
 -- MCP JSON-RPC handler
