@@ -4,6 +4,7 @@
 local M = {}
 
 local json = require("dkjson")
+local traversal = require("traversal")
 
 -- Helper to create tool response
 local function tool_response(content)
@@ -54,14 +55,25 @@ function M.list_messages(args, sessions, jmap_client)
   local sid = args.session_id
   local parent_ref = args.parent_ref
   
-  -- Check session exists
   if not sessions.exists(sid) then
     return tool_error("session_not_found", "Session does not exist")
   end
   
-  local mailbox_id = args.mailbox_id
-  local limit = args.limit or 50
+  -- Validate traversal parameters
+  local tparams, terr = traversal.validate({
+    limit = args.limit,
+    direction = args.direction,
+    time_window_start = args.time_window_start,
+    time_window_end = args.time_window_end,
+    anchor_message_id = args.anchor_message_id,
+    is_continuation = parent_ref ~= nil,
+    mailbox_id = args.mailbox_id,
+  })
+  if not tparams then
+    return tool_error("invalid_params", terr)
+  end
 
+  local mailbox_id = tparams.mailbox_id
   if not mailbox_id then
     local ierr
     mailbox_id, ierr = inbox(jmap_client)
@@ -72,27 +84,23 @@ function M.list_messages(args, sessions, jmap_client)
 
   local entry, aerr = append(sessions, sid, parent_ref, "list_messages", {
     mailbox_id = mailbox_id,
-    limit = limit,
-    time_window_start = args.time_window_start,
-    time_window_end = args.time_window_end,
+    limit = tparams.limit,
+    direction = tparams.direction,
+    time_window_start = tparams.time_window_start,
+    time_window_end = tparams.time_window_end,
   })
   if not entry then
     return aerr
   end
 
-  local email_ids, qerr = jmap_client.query_messages(mailbox_id, {
-    limit = limit,
-    sort = {{property = "receivedAt", isAscending = false}},
-    after = args.time_window_start,
-    before = args.time_window_end,
-  })
+  local opts = traversal.query_opts(tparams)
+  local email_ids, qerr = jmap_client.query_messages(mailbox_id, opts)
   
   if not email_ids then
     sessions.set_result(sid, entry.opref, {ok = false, error = qerr})
     return tool_error("jmap_error", "Failed to query messages", {error = qerr})
   end
   
-  -- Get email details
   local emails, err2 = jmap_client.get_emails(email_ids, {
     "id", "subject", "from", "to", "receivedAt", "size", "preview", "mailboxIds"
   })
@@ -102,23 +110,19 @@ function M.list_messages(args, sessions, jmap_client)
     return tool_error("jmap_error", "Failed to get email details", {error = err2})
   end
 
+  local bounds = traversal.bounds(emails, tparams)
+
   sessions.set_result(sid, entry.opref, {
     ok = true,
-    result_count = #emails,
-    traversal_anchor = {
-      oldest_received_at = emails[#emails] and emails[#emails].receivedAt or nil,
-      newest_received_at = emails[1] and emails[1].receivedAt or nil,
-    },
+    result_count = bounds.count,
+    traversal_anchor = bounds,
   })
   
   return tool_response({
     opref = entry.opref,
     messages = emails,
-    count = #emails,
-    traversal_anchor = {
-      oldest_received_at = emails[#emails] and emails[#emails].receivedAt or nil,
-      newest_received_at = emails[1] and emails[1].receivedAt or nil,
-    },
+    count = bounds.count,
+    traversal_anchor = bounds,
   })
 end
 
