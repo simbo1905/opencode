@@ -28,4 +28,4 @@ opencode-dev
 logs/
 *.bun-build
 .tmp
-.env
+help-session-ses_*.md

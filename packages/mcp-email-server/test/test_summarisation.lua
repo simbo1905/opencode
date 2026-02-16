@@ -14,12 +14,14 @@ io.stderr:setvbuf('no')
 
 local lunet = require("lunet")
 
--- Load .env
+-- Walk up from cwd looking for .env, but stop at the git repo root
+-- (never leave the current worktree — agent sandboxes will stall)
 local env = {}
 local function load_env()
-  local paths = {".env", "../../.env"}
-  for _, path in ipairs(paths) do
-    local file = io.open(path, "r")
+  local dir = "."
+  for _ = 1, 10 do
+    local env_path = dir .. "/.env"
+    local file = io.open(env_path, "r")
     if file then
       for line in file:lines() do
         local key, value = line:match("^([%w_]+)=(.*)$")
@@ -31,6 +33,12 @@ local function load_env()
       file:close()
       return
     end
+    local git = io.open(dir .. "/.git", "r") or io.open(dir .. "/.git/HEAD", "r")
+    if git then
+      git:close()
+      return
+    end
+    dir = dir .. "/.."
   end
 end
 
