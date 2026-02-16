@@ -1,0 +1,6 @@
+[submodule "vendor/lunet"]
+	path = vendor/lunet
+	url = https://github.com/lua-lunet/lunet.git
+[submodule "vendor/lunet-mcp-sse"]
+	path = vendor/lunet-mcp-sse
+	url = https://github.com/lua-lunet/lunet-mcp-sse.git
