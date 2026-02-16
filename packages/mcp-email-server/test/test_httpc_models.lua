@@ -63,7 +63,7 @@ local function test_completion(name, url, api_key, model, prompt)
   
   if not api_key or api_key == "" then
     print(string.format("[%s] SKIP: API key not set", name))
-    return {ok = false, reason = "no_api_key"}
+    return {ok = true, skipped = true}
   end
 
   local request_body = json_encode({
@@ -124,7 +124,7 @@ local function test_continuation(name, url, api_key, model)
   
   if not api_key or api_key == "" then
     print(string.format("[%s] SKIP: API key not set", name))
-    return {ok = false, reason = "no_api_key"}
+    return {ok = true, skipped = true}
   end
 
   local request_body = json_encode({
