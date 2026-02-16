@@ -1,8 +1,24 @@
 # Test Pyramid — MCP Email Server
 
-## Overview
+## Why a Pyramid?
 
-Three tiers of tests, two commands to run them:
+The Testing Pyramid (Fowler, 2012) is a strategic model for building a healthy test
+suite. The core idea: write many fast, cheap tests at the bottom; fewer slower tests
+in the middle; very few expensive end-to-end tests at the top.
+
+In TDD the pyramid keeps the red-green-refactor loop tight. Most feedback comes from
+unit tests that run in milliseconds. Integration tests catch boundary bugs that units
+miss. E2E tests exist only for critical flows where nothing else gives confidence.
+
+The layers are a rule of thumb, not a rigid boundary. We test by what is easy and
+effective at each level. Some things straddle layers. The goal is fast feedback and
+sustainable maintenance, not ceremony.
+
+When `test-full` runs it goes **up the pyramid**: units first, then offline module
+harnesses, then online harnesses that hit real APIs. If units fail, the rest is
+skipped — no point running slow tests on broken logic.
+
+## Two Commands
 
 ```bash
 make test-fast    # Unit + offline module tests (~2 seconds, no API keys)
