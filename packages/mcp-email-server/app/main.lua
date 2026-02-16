@@ -19,7 +19,7 @@ package.path = "./app/?.lua;" .. package.path
 local config = require("config")
 local session_mgr = require("session")
 local jmap = require("jmap")
-local json = require("json")
+local json = require("dkjson")
 
 -- Initialize session manager
 local sessions = session_mgr.new()

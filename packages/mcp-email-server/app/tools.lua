@@ -3,7 +3,7 @@
 
 local M = {}
 
-local json = require("json")
+local json = require("dkjson")
 
 -- Helper to create tool response
 local function tool_response(content)
