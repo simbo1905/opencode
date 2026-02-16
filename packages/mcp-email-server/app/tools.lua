@@ -63,9 +63,10 @@ function M.list_messages(args, sessions, jmap_client)
   local limit = args.limit or 50
 
   if not mailbox_id then
-    mailbox_id, err = inbox(jmap_client)
+    local ierr
+    mailbox_id, ierr = inbox(jmap_client)
     if not mailbox_id then
-      return tool_error("jmap_error", "Failed to resolve inbox", {error = err})
+      return tool_error("jmap_error", "Failed to resolve inbox", {error = ierr})
     end
   end
 
@@ -79,9 +80,7 @@ function M.list_messages(args, sessions, jmap_client)
     return aerr
   end
 
-  local email_ids
-  
-  email_ids, err = jmap_client.query_messages(mailbox_id, {
+  local email_ids, qerr = jmap_client.query_messages(mailbox_id, {
     limit = limit,
     sort = {{property = "receivedAt", isAscending = false}},
     after = args.time_window_start,
@@ -89,8 +88,8 @@ function M.list_messages(args, sessions, jmap_client)
   })
   
   if not email_ids then
-    sessions.set_result(sid, entry.opref, {ok = false, error = err})
-    return tool_error("jmap_error", "Failed to query messages", {error = err})
+    sessions.set_result(sid, entry.opref, {ok = false, error = qerr})
+    return tool_error("jmap_error", "Failed to query messages", {error = qerr})
   end
   
   -- Get email details

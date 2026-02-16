@@ -62,7 +62,15 @@ Pure logic tests. No I/O, no sockets, no external services.
 Each harness is a single Lua file that uses `lunet.spawn()` to exercise one subsystem
 with real I/O or controlled stubs. Prints structured pass/fail output. Exits 0 or 1.
 
-### Offline (no API keys needed)
+### Existing
+
+| File                    | Tests                                    | Boundary      | Network |
+| ----------------------- | ---------------------------------------- | ------------- | ------- |
+| `test_httpc_models.lua` | Raw httpc calls to Mistral/Groq/Together | `lunet.httpc` | Yes     |
+
+### Planned (not yet implemented)
+
+#### Offline (no API keys needed)
 
 | File                            | Tests                                  | Boundary                              |
 | ------------------------------- | -------------------------------------- | ------------------------------------- |
@@ -72,16 +80,15 @@ with real I/O or controlled stubs. Prints structured pass/fail output. Exits 0 o
 | `test_approval_sequences.lua`   | Multi-step approval gate flows         | `app/approval.lua` + `app/tools.lua`  |
 | `test_ledger_lifecycle.lua`     | Delayed action schedule/execute/cancel | `app/ledger.lua` + `app/tools.lua`    |
 
-These use `test/stub_jmap.lua` — a deterministic canned JMAP client with the same
+These will use `test/stub_jmap.lua` — a deterministic canned JMAP client with the same
 interface as `jmap.new()` but no network.
 
-### Online (needs API keys in .env)
+#### Online (needs API keys in .env)
 
-| File                     | Tests                                    | Boundary       |
-| ------------------------ | ---------------------------------------- | -------------- |
-| `test_httpc_models.lua`  | Raw httpc calls to Mistral/Groq/Together | `lunet.httpc`  |
-| `test_summarisation.lua` | Email classification via real LLM        | `app/llm.lua`  |
-| `test_jmap_session.lua`  | JMAP session discovery + mailbox query   | `app/jmap.lua` |
+| File                     | Tests                                  | Boundary       |
+| ------------------------ | -------------------------------------- | -------------- |
+| `test_summarisation.lua` | Email classification via real LLM      | `app/llm.lua`  |
+| `test_jmap_session.lua`  | JMAP session discovery + mailbox query | `app/jmap.lua` |
 
 **Naming:** `test_<module>.lua`
 

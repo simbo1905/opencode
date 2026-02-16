@@ -25,6 +25,7 @@ function M.new(config_approval)
   local persistent_approvals = {}
 
   -- Check if an action requires approval
+  -- Default-deny: unknown actions require approval (safe-by-default)
   function mgr.requires_approval(action)
     if safe_actions[action] then
       return false
@@ -32,7 +33,8 @@ function M.new(config_approval)
     if require_approval[action] then
       return true
     end
-    return false
+    -- Unknown actions default to requiring approval (deny-by-default)
+    return true
   end
 
   -- Check if approval has been granted

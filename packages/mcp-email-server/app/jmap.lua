@@ -11,6 +11,7 @@
 local M = {}
 
 local json = require("dkjson")
+local basexx = require("basexx")
 
 -- Load dependencies
 local httpc_ok, httpc = pcall(require, "lunet.httpc")
@@ -39,24 +40,7 @@ function M.new(opts)
     error("JMAP credentials not set - check JMAP_USERNAME and JMAP_PASSWORD env vars")
   end
   
-  -- Base64 encode for Basic auth
-  local function base64_encode(str)
-    local b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-    local result = {}
-    local padding = (3 - #str % 3) % 3
-    str = str .. string.rep('\0', padding)
-    for i = 1, #str, 3 do
-      local n = (str:byte(i) * 65536) + (str:byte(i+1) * 256) + str:byte(i+2)
-      result[#result+1] = b:sub(n / 262144 + 1, n / 262144 + 1)
-      result[#result+1] = b:sub((n / 4096) % 64 + 1, (n / 4096) % 64 + 1)
-      result[#result+1] = b:sub((n / 64) % 64 + 1, (n / 64) % 64 + 1)
-      result[#result+1] = b:sub(n % 64 + 1, n % 64 + 1)
-    end
-    for i = 1, padding do result[#result - i + 1] = '=' end
-    return table.concat(result)
-  end
-  
-  local auth_header = "Basic " .. base64_encode(client.username .. ":" .. client.password)
+  local auth_header = "Basic " .. basexx.to_base64(client.username .. ":" .. client.password)
   
   -- Fetch JMAP session (discovers API endpoint and account info)
   function client.session()

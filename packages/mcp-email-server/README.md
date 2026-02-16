@@ -91,7 +91,9 @@ JMAP_USERNAME=your_email@example.com
 JMAP_PASSWORD=your_app_password_here
 ```
 
-The `.env` file is loaded automatically by the application and test suite.
+The `.env` file is loaded by the test harnesses (e.g. `test/test_httpc_models.lua`).
+The application itself reads environment variables via `os.getenv()` — set them in
+your shell or use a process supervisor that loads `.env` for you.
 
 ### Why config.lua?
 
@@ -165,7 +167,7 @@ cd packages/mcp-email-server
 busted spec/
 ```
 
-Expected: 15 successes (session management), 53 pending (features not yet implemented).
+Expected: 171 successes, 0 failures, 0 pending.
 
 ## Architecture
 

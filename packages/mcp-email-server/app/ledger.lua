@@ -11,6 +11,10 @@
 local M = {}
 
 -- Ledger entry states
+-- Note: EXECUTED means "execution was attempted and preconditions passed".
+-- The actual outcome (success/failure of the external side effect) is
+-- recorded in entry.result via set_result(). Check entry.result.ok for
+-- whether the side effect succeeded.
 M.PENDING = "pending"
 M.EXECUTED = "executed"
 M.CANCELLED = "cancelled"

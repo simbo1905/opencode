@@ -41,9 +41,9 @@ describe("approval.new", function()
 
   it("uses defaults when config fields are missing", function()
     local mgr = approval.new({})
-    -- With empty config, nothing requires approval and nothing is safe
-    assert.is_false(mgr.requires_approval("send"))
-    assert.is_false(mgr.requires_approval("archive"))
+    -- With empty config, unknown actions default-deny (require approval)
+    assert.is_true(mgr.requires_approval("send"))
+    assert.is_true(mgr.requires_approval("archive"))
   end)
 end)
 
@@ -78,8 +78,8 @@ describe("mgr.requires_approval", function()
     assert.is_false(mgr.requires_approval("mark_read"))
   end)
 
-  it("returns false for an unknown action", function()
-    assert.is_false(mgr.requires_approval("unknown_action"))
+  it("returns true for an unknown action (default-deny)", function()
+    assert.is_true(mgr.requires_approval("unknown_action"))
   end)
 end)
 
@@ -377,10 +377,12 @@ describe("mgr.gate", function()
     assert.is_true(ok)
   end)
 
-  -- ── unknown actions ──
-  it("allows unknown action that is not in require_approval", function()
-    local ok = mgr.gate("s1", "unknown_action", nil)
-    assert.is_true(ok)
+  -- ── unknown actions (default-deny) ──
+  it("blocks unknown action (default-deny for safety)", function()
+    local ok, info = mgr.gate("s1", "unknown_action", nil)
+    assert.is_false(ok)
+    assert.is_table(info)
+    assert.is_true(info.requires_approval)
   end)
 
   -- ── rejection info structure ──

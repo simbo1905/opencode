@@ -22,7 +22,7 @@ local jmap = require("jmap")
 local json = require("dkjson")
 local approval_mod = require("approval")
 local ledger_mod = require("ledger")
-local tools = require("tools")
+local toolmod = require("tools")
 
 -- Initialize modules
 local sessions = session_mgr.new()
@@ -44,7 +44,7 @@ print("  - session_status: Query current session state")
 print("")
 
 -- MCP tool definitions
-local tools = {
+local tooldefs = {
   {
     name = "list_messages",
     description = "List messages from mailbox with explicit continuation anchors. Requires ParentRef for traversal integrity.",
@@ -68,9 +68,10 @@ local tools = {
       type = "object",
       properties = {
         session_id = {type = "string"},
+        parent_ref = {type = "string", description = "Parent OpRef for session continuity (null for first operation)"},
         message_id = {type = "string"},
       },
-      required = {"session_id", "message_id"},
+      required = {"session_id", "parent_ref", "message_id"},
     },
   },
   {
@@ -80,12 +81,13 @@ local tools = {
       type = "object",
       properties = {
         session_id = {type = "string"},
+        parent_ref = {type = "string", description = "Parent OpRef for session continuity (null for first operation)"},
         message_id = {type = "string"},
         subject = {type = "string"},
         from = {type = "string"},
         preview = {type = "string"},
       },
-      required = {"session_id", "message_id", "subject", "from"},
+      required = {"session_id", "parent_ref", "message_id", "subject", "from"},
     },
   },
   {
@@ -176,15 +178,15 @@ local tools = {
 
 -- Tool dispatch table
 local dispatchers = {
-  list_messages = function(args) return tools.list_messages(args, sessions, nil) end,
-  get_message = function(args) return tools.get_message(args, sessions, nil) end,
-  classify_email = function(args) return tools.classify_email(args, sessions, nil, config) end,
-  archive_message = function(args) return tools.archive_message(args, sessions, nil, approvals) end,
-  trash_message = function(args) return tools.trash_message(args, sessions, nil, approvals) end,
-  send_message = function(args) return tools.send_message(args, sessions, nil, approvals, action_ledger) end,
-  delete_message = function(args) return tools.delete_message(args, sessions, nil, approvals, action_ledger) end,
-  session_status = function(args) return tools.session_status(args, sessions) end,
-  query_ledger = function(args) return tools.query_ledger(args, action_ledger) end,
+  list_messages = function(args) return toolmod.list_messages(args, sessions, nil) end,
+  get_message = function(args) return toolmod.get_message(args, sessions, nil) end,
+  classify_email = function(args) return toolmod.classify_email(args, sessions, nil, config) end,
+  archive_message = function(args) return toolmod.archive_message(args, sessions, nil, approvals) end,
+  trash_message = function(args) return toolmod.trash_message(args, sessions, nil, approvals) end,
+  send_message = function(args) return toolmod.send_message(args, sessions, nil, approvals, action_ledger) end,
+  delete_message = function(args) return toolmod.delete_message(args, sessions, nil, approvals, action_ledger) end,
+  session_status = function(args) return toolmod.session_status(args, sessions) end,
+  query_ledger = function(args) return toolmod.query_ledger(args, action_ledger) end,
 }
 
 local function handle_tool_call(tool_name, args)
@@ -222,7 +224,7 @@ local function handle_mcp_request(request)
     return {
       jsonrpc = "2.0",
       id = id,
-      result = {tools = tools},
+      result = {tools = tooldefs},
     }
   elseif method == "tools/call" then
     local tool_name = request.params.name
