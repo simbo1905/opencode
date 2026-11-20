@@ -4,11 +4,22 @@ on:
   push:
     branches:
       - dev
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.mdx"
+      - "docs/**"
+      - "packages/docs/**"
+      - "packages/web/src/content/docs/**"
   workflow_dispatch:
+
+concurrency:
+  group: generate-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   generate:
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
     permissions:
       contents: write
       pull-requests: write

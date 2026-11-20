@@ -20,6 +20,7 @@ jobs:
   update:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
     env:
       SYSTEM: x86_64-linux
 

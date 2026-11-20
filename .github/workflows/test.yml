@@ -4,13 +4,25 @@ on:
   push:
     branches-ignore:
       - production
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.mdx"
+      - "docs/**"
+      - "packages/docs/**"
+      - "packages/web/src/content/docs/**"
   pull_request:
     branches-ignore:
       - production
   workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
